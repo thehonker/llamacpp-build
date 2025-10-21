@@ -1,0 +1,87 @@
+name: llamacpp
+on:
+  workflow_call:
+    inputs:
+      gpu-driver:
+        required: true
+        type: string
+      build-type:
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: thehonker/llamacpp
+
+jobs:
+  build-and-push:
+    runs-on: self-hosted
+    name: ${{ inputs.gpu-driver }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clone llamacpp repo, apply any patches
+        run: |
+          # Clone repo
+          git clone --depth=20 --single-branch --branch main https://github.com/ggml-org/llama.cpp.git "${{ github.workspace }}/src/llamacpp"
+
+          # Determine tag to apply to container image
+          if [[ ${{ inputs.build-type }} == "tag" ]]; then
+            GIT_REF="$(cd "${{ github.workspace }}/src/llamacpp" && git describe --tags --abbrev=0)"
+            echo "GIT_REF=${GIT_REF}" >> "$GITHUB_ENV"
+          else
+            GIT_REF="$(cd "${{ github.workspace }}/src/llamacpp" && git --no-pager log -n 1 --pretty=format:"%h")"
+            echo "GIT_REF=${GIT_REF}" >> "$GITHUB_ENV"
+          fi
+
+          # Apply patches
+          cd "${{ github.workspace }}/src/llamacpp"
+          git checkout "${GIT_REF}"
+          for patch in "${{ github.workspace }}/patches/${{ inputs.gpu-driver }}/"*.patch; do
+            if test -f "$patch"; then
+              echo "Applying patch $patch"
+              git -C "${{ github.workspace }}/src/llamacpp" apply "$patch"
+            fi
+          done
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          tags: |
+            type=raw,value=latest,priority=1000,prefix=${{ inputs.gpu-driver }}-,enable=${{ inputs.build-type == 'hash' }}
+            type=raw,value=stable,priority=1000,prefix=${{ inputs.gpu-driver }}-,enable=${{ inputs.build-type == 'tag' }}
+            type=schedule,enable=true,priority=900,pattern={{date 'YYYYMMDD'}},prefix=${{ inputs.gpu-driver }}-
+            type=raw,value=${{ env.GIT_REF }},priority=800,prefix=${{ inputs.gpu-driver }}-
+          images: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build and Push Image
+        uses: docker/bake-action@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          source: .
+          push: true
+          files: |
+            "./docker-bake.hcl"
+            cwd://${{ steps.meta.outputs.bake-file }}
+          targets: build
+          set: |
+            build.args.GPU_DRIVER=${{ inputs.gpu-driver }}
+            build.dockerfile=Dockerfile.${{ inputs.gpu-driver }}
