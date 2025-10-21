@@ -32,7 +32,7 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY ./src/llamacpp .
+COPY ./llamacpp .
 
 RUN HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)" \
     cmake -S . -B build \
