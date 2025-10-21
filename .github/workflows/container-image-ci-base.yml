@@ -38,7 +38,7 @@ jobs:
       - name: Clone llamacpp repo, apply any patches
         run: |
           # Clone repo
-          git clone --depth=20 --single-branch --branch main https://github.com/ggml-org/llama.cpp.git "${{ github.workspace }}/src/llamacpp"
+          git clone --depth=20 --single-branch --branch master https://github.com/ggml-org/llama.cpp.git "${{ github.workspace }}/src/llamacpp"
 
           # Determine tag to apply to container image
           if [[ ${{ inputs.build-type }} == "tag" ]]; then
